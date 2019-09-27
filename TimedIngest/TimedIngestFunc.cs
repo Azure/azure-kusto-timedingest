@@ -39,6 +39,15 @@ namespace TimedIngest
                 throw new Exception("Could not initialize, cancel request");
             }
 
+            //check for blob created
+            var eventType = eventGridEvent.EventType;
+
+            if(!eventType.Equals("Microsoft.Storage.BlobCreated"))
+            {
+                log.LogWarning($"The eventgrid type {eventType} is not supported");
+                return;
+            }
+
             var dataOfEventGrid = (JObject)eventGridEvent.Data;
 
             String urlOfToBeInsertedBlob = HttpUtility.UrlDecode(dataOfEventGrid.GetValue("url").Value<String>());
@@ -60,8 +69,19 @@ namespace TimedIngest
             }
 
             long contentLength = dataOfEventGrid.GetValue("contentLength").Value<long>();
-
-            await TriggerIngestCommand(insertDate, urlOfToBeInsertedBlob, contentLength);
+            try
+            {
+                await TriggerIngestCommand(insertDate, urlOfToBeInsertedBlob, contentLength);
+            }
+            catch(Exception e)
+            {
+                log.LogError($"Error while trying to insert blob {urlOfToBeInsertedBlob} because of message: {e.Message}");
+                throw e;
+            }
+            finally
+            {
+                log.LogTrace($"Triggered insertion of blob {urlOfToBeInsertedBlob}");
+            }
         }
 
         private static bool TryInitialize(ILogger log)
