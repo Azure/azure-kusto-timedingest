@@ -52,6 +52,8 @@ namespace TimedIngest
 
             String urlOfToBeInsertedBlob = HttpUtility.UrlDecode(dataOfEventGrid.GetValue("url").Value<String>());
 
+            log.LogTrace($"URL found: {urlOfToBeInsertedBlob}");
+
             if (urlOfToBeInsertedBlob.Contains("azuretmpfolder"))
             {
                 log.LogInformation($"Nothing to insert because the container {urlOfToBeInsertedBlob} has been blacklisted");
@@ -69,9 +71,19 @@ namespace TimedIngest
             }
 
             long contentLength = dataOfEventGrid.GetValue("contentLength").Value<long>();
+            if(contentLength == 0)
+            {
+                //Event grid sends an 0 blob size when blob has been created and then a second event when the blob has been finished. 
+                // -> the first event has to be ignored
+                log.LogWarning($"Found an empty blob {urlOfToBeInsertedBlob} which has been raised by event grid");
+                log.LogMetric("EmptyBlobEvent", 1);
+                return;
+            }
+
+
             try
             {
-                await TriggerIngestCommand(insertDate, urlOfToBeInsertedBlob, contentLength);
+                await TriggerIngestCommand(insertDate, urlOfToBeInsertedBlob, contentLength, log);
             }
             catch(Exception e)
             {
@@ -135,7 +147,7 @@ namespace TimedIngest
             return false;
         }
 
-        private static Task TriggerIngestCommand(DateTime insertDate, string urlOfToBeInsertedBlob, long rawDatasize)
+        private static Task TriggerIngestCommand(DateTime insertDate, string urlOfToBeInsertedBlob, long rawDatasize, ILogger log)
         {
             var ingestProperties = new KustoIngestionProperties(GetEnvVariable("KustoDatabase"), GetEnvVariable("KustoTableName"));
 
@@ -161,6 +173,8 @@ namespace TimedIngest
             StorageSourceOptions sourceOptions = new StorageSourceOptions();
             sourceOptions.Size = rawDatasize;
             sourceOptions.DeleteSourceOnSuccess = Boolean.Parse(GetEnvVariable("DeleteAfterInsert"));
+
+            log.LogTrace($"INGEST URL:{urlOfToBeInsertedBlob} SIZE:{rawDatasize} INSERTDATE:{insertDate}");
 
             return adx.IngestFromStorageAsync(urlOfToBeInsertedBlob + Environment.GetEnvironmentVariable("SasToken"), ingestProperties, sourceOptions);
         }
